@@ -1,0 +1,8 @@
+{
+  "name": "slack-report",
+  "version": "0.1.0",
+  "description": "DB 조회 결과를 Slack에 요약·사용한 쿼리·그래프·엑셀로 보내는 Claude Code 스킬(조회 전용, 보내기 전 승인)",
+  "author": { "name": "hava12" },
+  "repository": "https://github.com/hava12/claude-slack-report",
+  "license": "MIT"
+}

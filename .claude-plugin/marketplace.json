@@ -1,0 +1,14 @@
+{
+  "name": "claude-slack-report",
+  "description": "DB 조회 결과를 Slack으로 보내는 Claude Code 스킬 모음",
+  "owner": {
+    "name": "hava12"
+  },
+  "plugins": [
+    {
+      "name": "slack-report",
+      "source": "./",
+      "description": "DB 조회 결과를 Slack에 요약·사용한 쿼리·그래프·엑셀로 보내는 스킬"
+    }
+  ]
+}
