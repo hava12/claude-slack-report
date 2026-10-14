@@ -31,7 +31,9 @@ with tempfile.TemporaryDirectory() as d:
            '--chart', 'bar', '--x', '센터', '--y', '회원 수', '--top', '2', '--dry-run']
     run = subprocess.run(cmd, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
-    assert 'WHERE cnt &gt; 100' in run.stdout, run.stdout  # 쿼리가 글에 들어가고, Slack 기호가 바뀐다
+    assert 'made by hudson and metabase mcp' in run.stdout, run.stdout  # 끝의 작은 글씨
+    assert 'WHERE cnt' not in run.stdout, run.stdout  # 쿼리는 글이 아니라 파일로 붙는다(Slack에서 접혀 보인다)
+    assert (Path(d) / '센터별 회원 수.sql').read_text(encoding='utf-8') == sql.read_text(encoding='utf-8')
     ws = load_workbook(Path(d) / '센터별 회원 수.xlsx').active
     assert ws.max_row == 4 and [c.value for c in ws[2]] == ['강남점', 1200, '007']  # 그래프는 상위 2개, 엑셀은 전부
     assert (Path(d) / '센터별 회원 수.png').stat().st_size > 10000

@@ -3,14 +3,15 @@
   쿼리 검사(실행 전에): run.sh --check-sql query.sql
   만들기·보내기:       run.sh --title "센터별 회원 수 (2026-10-13)" --data rows.csv --sql query.sql \
                           [--db "DB 이름"] [--summary "요약 글"] [--chart bar|line --x 열 --y 열[,열] [--top 10]] \
-                          (--dry-run | --channel C0123ABCD)
+                          (--dry-run | --send | --channel C0123ABCD)
 
---data 는 머리줄이 있는 CSV(UTF-8), --sql 은 그 결과를 낸 쿼리 그대로다. 같은 폴더에 <제목>.png·<제목>.xlsx 를 만든다.
+--data 는 머리줄이 있는 CSV(UTF-8), --sql 은 그 결과를 낸 쿼리 그대로다. 같은 폴더에 <제목>.png·<제목>.xlsx·<제목>.sql 을 만든다.
 쿼리가 조회(SELECT 등)가 아니면 아무것도 만들거나 보내지 않고 멈춘다.
 --top N 은 그래프에만 세로축 첫 열이 큰 순으로 N개를 그린다(엑셀에는 전부 들어간다).
+쿼리는 글에 넣지 않고 <제목>.sql 로 붙인다(Slack에서 접혀 보인다).
 --dry-run 이면 파일만 만들고 Slack에는 보내지 않는다(보내기 전에 확인용).
-채널은 --channel, 없으면 SLACK_REPORT_CHANNEL 환경 변수다.
-토큰은 SLACK_BOT_TOKEN 환경 변수, 없으면 ~/.slack-bot-token 파일에서 읽는다.
+설정은 SLACK_BOT_TOKEN·SLACK_CHANNEL 환경 변수, 없으면 ~/.config/slack-report/.env 에서 읽는다(.env.template 을 복사해 채운다).
+--send 는 SLACK_CHANNEL 로 보낸다.
 봇 권한은 chat:write, files:write 이고, 봇을 채널에 초대해 둬야 한다.
 """
 import argparse
@@ -23,16 +24,17 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-TOKEN_FILE = Path.home() / '.slack-bot-token'
+# 플러그인 폴더는 업데이트 때 새로 깔리므로 설정은 폴더 밖에 둔다.
+ENV_FILE = Path.home() / '.config' / 'slack-report' / '.env'
 # 한글 글꼴. 있는 것 가운데 앞의 것을 쓴다(macOS, Windows, 리눅스 순).
 FONTS = ['AppleGothic', 'Apple SD Gothic Neo', 'Malgun Gothic', 'NanumGothic', 'Noto Sans CJK KR', 'Noto Sans KR']
-SQL_INLINE = 3000  # 이보다 긴 쿼리는 글 대신 .sql 파일로 붙인다
 # 엑셀에 숫자로 넣을 꼴. 앞자리 0(번호)·16자리 이상(엑셀이 끝자리를 잃는다)·전화번호는 글자 그대로 둔다.
 NUMBER = re.compile(r'-?(0|[1-9]\d{0,14})(\.\d+)?')
-# 조회 쿼리 검사. 실수를 거르는 장치이고, 실행을 막는 진짜 보장은 읽기 전용 DB 계정이다.
+# 조회 쿼리 검사. 실수를 거르는 장치이고, 실행을 막는 진짜 보장은 메타베이스가 읽기 전용 DB 계정으로 붙는 것이다.
 READ_START = re.compile(r'(SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN)\b', re.I)
 NOT_READ = re.compile(r'\b(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|RENAME|GRANT|REVOKE|CALL|EXEC|EXECUTE'
                       r'|LOCK|SHARE|INTO|LOAD_FILE|GET_LOCK|NEXTVAL|SETVAL|PG_TERMINATE_BACKEND|PG_CANCEL_BACKEND|DBLINK_EXEC)\b', re.I)
+FOOTER = 'made by hudson and metabase mcp'  # 모든 글 끝에 작은 글씨(context 블록)로 붙인다
 QUOTED = re.compile(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\"|`[^`]*`")
 
 
@@ -130,8 +132,8 @@ def escape(text):
 def message(title, summary, sql, db):
     text = f'*{escape(title)}*' + (f'\n{escape(summary)}' if summary else '')
     if sql:
-        text += '\n\n*사용한 쿼리*' + (f' (DB: {escape(db)})' if db else '')
-        text += f'\n```\n{escape(sql.strip())}\n```' if len(sql) <= SQL_INLINE else ' — 길어서 파일로 붙였습니다.'
+        # Slack 글에는 접기가 없어서, 쿼리는 .sql 파일로 붙인다(미리보기 몇 줄만 보이고 누르면 펼쳐진다).
+        text += '\n\n*사용한 쿼리*' + (f' (DB: {escape(db)})' if db else '') + ' — 붙인 .sql 파일을 누르면 펼쳐집니다.'
     return text
 
 
@@ -153,11 +155,14 @@ def upload(token, path):
 
 
 def send(token, channel, text, files):
+    # 작은 글씨는 context 블록으로만 된다. 파일과 함께 보낼 때 initial_comment 를 주면 blocks 가 무시되므로 blocks 만 준다.
+    blocks = json.dumps([{'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}},
+                         {'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': FOOTER}]}], ensure_ascii=False)
     if not files:
-        slack('chat.postMessage', token, channel=channel, text=text)
+        slack('chat.postMessage', token, channel=channel, text=text, blocks=blocks)
         return
     uploaded = [{'id': upload(token, f), 'title': f.name} for f in files]
-    slack('files.completeUploadExternal', token, files=json.dumps(uploaded, ensure_ascii=False), channel_id=channel, initial_comment=text)
+    slack('files.completeUploadExternal', token, files=json.dumps(uploaded, ensure_ascii=False), channel_id=channel, blocks=blocks)
 
 
 def main():
@@ -172,10 +177,10 @@ def main():
     p.add_argument('--x', help='가로축 열 이름')
     p.add_argument('--y', help='세로축 열 이름(쉼표로 여러 개)')
     p.add_argument('--top', type=int, help='그래프에만 큰 순으로 N개')
-    p.add_argument('--channel', help='채널 ID(C로 시작)')
+    p.add_argument('--send', action='store_true', help='설정 파일의 기본 채널로 보낸다')
+    p.add_argument('--channel', help='다른 채널로 보낼 때 채널 ID(C로 시작)')
     p.add_argument('--dry-run', action='store_true', help='파일만 만들고 보내지 않는다')
     a = p.parse_args()
-    a.channel = a.channel or os.environ.get('SLACK_REPORT_CHANNEL')
     if a.check_sql:
         problem = query_problem(a.check_sql.read_text(encoding='utf-8'))
         if problem:
@@ -188,8 +193,8 @@ def main():
         p.error('--data 에는 그 결과를 낸 쿼리(--sql)가 함께 있어야 합니다.')
     if a.chart and not (a.data and a.x and a.y):
         p.error('--chart 에는 --data, --x, --y 가 함께 있어야 합니다.')
-    if not a.dry_run and not a.channel:
-        p.error('--channel 또는 SLACK_REPORT_CHANNEL 이 없습니다(확인만 하려면 --dry-run).')
+    if not (a.dry_run or a.send or a.channel):
+        p.error('--send(기본 채널) 나 --channel 이 없습니다(확인만 하려면 --dry-run).')
     sql = a.sql.read_text(encoding='utf-8') if a.sql else ''
     if sql and (problem := query_problem(sql)):
         sys.exit(f'보내지 않습니다. 조회 쿼리가 아닙니다: {problem}')
@@ -202,19 +207,26 @@ def main():
             write_chart(header, rows, a.chart, a.x, a.y.split(','), a.title, files[-1], a.top)
         files.append(a.data.parent / f'{name}.xlsx')
         write_xlsx(header, rows, files[-1])
-    if len(sql) > SQL_INLINE:
+    if sql:
         files.append(a.sql.parent / f'{name}.sql')
         files[-1].write_text(sql, encoding='utf-8')
     text = message(a.title, a.summary, sql, a.db)
     if a.dry_run:
         print('만든 파일:', *files, sep='\n  ')
-        print('보낼 글:\n' + text)
+        print('보낼 글:\n' + text + f'\n(작은 글씨) {FOOTER}')
         return
-    token = os.environ.get('SLACK_BOT_TOKEN') or (TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else '')
-    if not token:
-        sys.exit(f'Slack 봇 토큰이 없습니다. SLACK_BOT_TOKEN 환경 변수나 {TOKEN_FILE} 파일(권한 600)에 넣어 주세요.')
-    send(token, a.channel, text, files)
-    print(f'보냈습니다: 채널 {a.channel}, 파일 {len(files)}개')
+    env = {}
+    if ENV_FILE.exists():
+        env = {k.strip(): v.strip() for k, v in (line.split('=', 1) for line in ENV_FILE.read_text(encoding='utf-8').splitlines()
+                                                  if '=' in line and not line.lstrip().startswith('#'))}
+    env.update({k: os.environ[k] for k in ('SLACK_BOT_TOKEN', 'SLACK_CHANNEL') if os.environ.get(k)})
+    token, channel = env.get('SLACK_BOT_TOKEN'), a.channel or env.get('SLACK_CHANNEL')
+    if not token or not channel:
+        template = Path(__file__).parent / '.env.template'
+        sys.exit(f'토큰이나 채널이 없습니다. 아래처럼 설정 파일을 만들고 값을 채우세요.\n'
+                 f'  mkdir -p {ENV_FILE.parent} && cp "{template}" {ENV_FILE} && chmod 600 {ENV_FILE}')
+    send(token, channel, text, files)
+    print(f'보냈습니다: 채널 {channel}, 파일 {len(files)}개')
 
 
 if __name__ == '__main__':

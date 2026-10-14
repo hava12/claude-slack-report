@@ -14,12 +14,7 @@ DB 조회 결과를 Slack 채널에 **요약 글 + 사용한 쿼리 + 그래프(
    ```
    Claude Code는 `https`가 아닌 주소로는 로그인하지 않습니다(`localhost`만 예외).
 2. **Slack 앱**: api.slack.com/apps에서 앱을 만들고, Bot Token Scopes에 `chat:write`, `files:write`를 넣어 워크스페이스에 설치합니다. 결과를 받을 채널에 봇을 초대합니다(`/invite @봇이름`).
-3. **토큰 저장**: Bot User OAuth Token(`xoxb-…`)을 복사한 뒤 터미널에서 실행합니다(macOS). 또는 `SLACK_BOT_TOKEN` 환경 변수를 써도 됩니다.
-   ```
-   pbpaste > ~/.slack-bot-token && chmod 600 ~/.slack-bot-token
-   ```
-4. **기본 채널(선택)**: `SLACK_REPORT_CHANNEL=C0123ABCD` 환경 변수를 두면 매번 채널을 말하지 않아도 됩니다.
-5. **Python 3.8 이상**: 처음 보낼 때 `~/.cache/slack-report/venv`에 matplotlib·openpyxl을 설치합니다.
+3. **Python 3.8 이상**: 처음 실행할 때 `~/.cache/slack-report/venv`에 matplotlib·openpyxl을 알아서 설치합니다. 따로 설치 명령은 없습니다.
 
 ## 설치
 
@@ -28,6 +23,17 @@ Claude Code에서:
 /plugin marketplace add hava12/claude-slack-report
 /plugin install slack-report@claude-slack-report
 ```
+
+그다음 터미널에서 설정 파일을 만들고, `SLACK_BOT_TOKEN`(`xoxb-…`)과 기본 `SLACK_CHANNEL`(채널 ID)을 채웁니다.
+```
+mkdir -p ~/.config/slack-report
+cp ~/.claude/plugins/marketplaces/claude-slack-report/skills/slack-report/.env.template ~/.config/slack-report/.env
+chmod 600 ~/.config/slack-report/.env
+open -e ~/.config/slack-report/.env
+```
+설정이 없는 채로 보내려고 하면, 스킬이 이 명령을 알려 줍니다. 환경 변수 `SLACK_BOT_TOKEN`·`SLACK_CHANNEL`을 써도 됩니다(파일보다 먼저).
+
+업데이트는 `/plugin marketplace update claude-slack-report`입니다.
 
 ## 쓰기
 
